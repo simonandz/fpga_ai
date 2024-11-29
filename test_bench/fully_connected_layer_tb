@@ -1,0 +1,212 @@
+// File: tb_fully_connected_layer.sv
+`timescale 1ns/1ps
+
+module tb_fully_connected_layer;
+
+    // Parameters
+    parameter INPUT_SIZE  = 12;
+    parameter OUTPUT_SIZE = 4;
+
+    // Inputs to the DUT
+    logic clk;
+    logic reset;
+    logic start;
+    logic [INPUT_SIZE*8-1:0] input_vector_packed;
+    logic signed [INPUT_SIZE*OUTPUT_SIZE*8-1:0] weights_packed;
+    logic signed [OUTPUT_SIZE*8-1:0] biases_packed;
+
+    // Outputs from the DUT
+    logic signed [OUTPUT_SIZE*16-1:0] fc_output_packed;
+    logic done;
+
+    // Internal variables
+    integer i, n;
+    integer error_count;
+
+    // Unpacked Inputs
+    logic [7:0] input_vector [0:INPUT_SIZE-1];
+    logic signed [7:0] weights [0:OUTPUT_SIZE-1][0:INPUT_SIZE-1];
+    logic signed [7:0] biases [0:OUTPUT_SIZE-1];
+
+    // Unpacked Outputs
+    logic signed [15:0] fc_output [0:OUTPUT_SIZE-1];
+
+    // Expected outputs
+    logic signed [15:0] expected_output [0:OUTPUT_SIZE-1];
+
+    // Instantiate the DUT
+    fully_connected_layer #(
+        .INPUT_SIZE(INPUT_SIZE),
+        .OUTPUT_SIZE(OUTPUT_SIZE)
+    ) dut (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .input_vector_packed(input_vector_packed),
+        .weights_packed(weights_packed),
+        .biases_packed(biases_packed),
+        .fc_output_packed(fc_output_packed),
+        .done(done)
+    );
+
+    // Clock generation
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk; // Clock period: 10ns
+    end
+
+    // Pack Inputs
+    task pack_inputs;
+        begin
+            // Pack input_vector
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                input_vector_packed[(INPUT_SIZE - i)*8 -1 -: 8] = input_vector[i];
+            end
+
+            // Pack weights
+            for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                    weights_packed[((n*INPUT_SIZE + i)+1)*8 -1 -: 8] = weights[n][i];
+                end
+            end
+
+            // Pack biases
+            for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                biases_packed[(n+1)*8 -1 -: 8] = biases[n];
+            end
+        end
+    endtask
+
+    // Unpack Outputs
+    task unpack_outputs;
+        begin
+            for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                fc_output[n] = fc_output_packed[(OUTPUT_SIZE - n)*16 -1 -: 16];
+            end
+        end
+    endtask
+
+    // Testbench logic
+    initial begin
+        // Initialize inputs
+        reset = 1;
+        start = 0;
+        input_vector_packed = '0;
+        weights_packed = '0;
+        biases_packed = '0;
+
+        // Initialize unpacked inputs
+        for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+            input_vector[i] = 8'd0;
+        end
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                weights[n][i] = 8'sd0;
+            end
+            biases[n] = 8'sd0;
+        end
+
+        // Wait for a few clock cycles
+        @(posedge clk);
+        @(posedge clk);
+
+        // Release reset
+        reset = 0;
+        $display("Time %0t ns: Reset deasserted", $time);
+
+        // Wait for a clock cycle
+        @(posedge clk);
+
+        // Provide test vectors
+        // Example input vector
+        for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+            input_vector[i] = i + 1; // Input vector: 1, 2, 3, ..., INPUT_SIZE
+        end
+
+        // Example weights
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                weights[n][i] = ((n + i) % 5) - 2; // Weights: -2 to 2
+            end
+        end
+
+        // Example biases
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            biases[n] = n - 2; // Biases: -2, -1, 0, 1
+        end
+
+        // Pack inputs
+        pack_inputs();
+
+        // Calculate expected outputs
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            expected_output[n] = 0;
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                expected_output[n] = expected_output[n] + ($signed(input_vector[i]) * $signed(weights[n][i]));
+            end
+            expected_output[n] = expected_output[n] + $signed(biases[n]);
+        end
+
+        // Display inputs
+        $display("Input Vector:");
+        for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+            $write("%0d ", input_vector[i]);
+        end
+        $display("\n");
+
+        $display("Weights:");
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            $write("Neuron %0d: ", n);
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                $write("%0d ", weights[n][i]);
+            end
+            $display("");
+        end
+
+        $display("Biases:");
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            $display("Bias[%0d] = %0d", n, biases[n]);
+        end
+
+        // Start the computation
+        @(posedge clk);
+        start = 1;
+        @(posedge clk);
+        start = 0;
+        $display("Time %0t ns: Started fully connected layer computation", $time);
+
+        // Wait for the computation to complete
+        @(posedge clk);
+        while (!done) begin
+            @(posedge clk);
+        end
+        $display("Time %0t ns: Computation completed", $time);
+
+        // Wait one more clock cycle to ensure outputs are updated
+        @(posedge clk);
+
+        // Unpack outputs
+        unpack_outputs();
+
+        // Check the outputs
+        error_count = 0;
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            $display("Output[%0d]: Expected = %0d, Actual = %0d", n, expected_output[n], fc_output[n]);
+            if (fc_output[n] !== expected_output[n]) begin
+                $display("Mismatch at output %0d: expected %0d, got %0d", n, expected_output[n], fc_output[n]);
+                error_count = error_count + 1;
+            end
+        end
+
+        if (error_count == 0) begin
+            $display("Test Passed: All outputs match expected values");
+        end else begin
+            $display("Test Failed: %0d mismatches found", error_count);
+        end
+
+        // Finish simulation
+        #10;
+        $finish;
+    end
+
+endmodule

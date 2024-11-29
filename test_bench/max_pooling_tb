@@ -1,0 +1,119 @@
+// File: tb_max_pooling.sv
+`timescale 1ns/1ps
+
+module tb_max_pooling;
+
+    // Parameters
+    parameter DATA_WIDTH = 8;
+    parameter POOL_SIZE = 2;
+
+    // Inputs to the DUT
+    logic clk;
+    logic reset;
+    logic start;
+    logic [DATA_WIDTH-1:0] input_pixel;
+    logic input_valid;
+
+    // Outputs from the DUT
+    logic [DATA_WIDTH-1:0] pooled_pixel;
+    logic pooled_valid;
+    logic done;
+
+    // Internal variables
+    integer i;
+    integer num_inputs;
+    logic [DATA_WIDTH-1:0] input_pixels [0:POOL_SIZE*POOL_SIZE-1];
+    logic [DATA_WIDTH-1:0] expected_pooled_value;
+    integer error_count;
+
+    // Instantiate the DUT
+    max_pooling #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .POOL_SIZE(POOL_SIZE)
+    ) dut (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .input_pixel(input_pixel),
+        .input_valid(input_valid),
+        .pooled_pixel(pooled_pixel),
+        .pooled_valid(pooled_valid),
+        .done(done)
+    );
+
+    // Clock generation
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk; // Clock period: 10ns
+    end
+
+    // Testbench logic
+    initial begin
+        // Initialize inputs
+        reset = 1;
+        start = 0;
+        input_pixel = '0;
+        input_valid = 0;
+
+        // Wait for a few clock cycles
+        @(posedge clk);
+        @(posedge clk);
+
+        // Release reset
+        reset = 0;
+        $display("Time %0t ns: Reset deasserted", $time);
+
+        // Wait for a clock cycle
+        @(posedge clk);
+
+        // Initialize input pixels
+        num_inputs = POOL_SIZE * POOL_SIZE;
+
+        // Example test case
+        input_pixels[0] = 8'd10;
+        input_pixels[1] = 8'd20;
+        input_pixels[2] = 8'd15;
+        input_pixels[3] = 8'd5;
+
+        expected_pooled_value = 8'd20;
+
+        // Start the pooling operation
+        start = 1;
+        @(posedge clk);
+        start = 0;
+        $display("Time %0t ns: Started pooling operation", $time);
+
+        // Provide input pixels
+        for (i = 0; i < num_inputs; i = i + 1) begin
+            @(posedge clk);
+            input_pixel = input_pixels[i];
+            input_valid = 1;
+            $display("Time %0t ns: Providing input_pixel[%0d]=%0d", $time, i, input_pixel);
+            @(posedge clk);
+            input_valid = 0;
+        end
+
+        // Wait for done signal
+        @(posedge clk);
+        while (!done) begin
+            @(posedge clk);
+        end
+
+        // Check output
+        if (pooled_valid) begin
+            $display("Time %0t ns: Received pooled_pixel=%0d", $time, pooled_pixel);
+            if (pooled_pixel == expected_pooled_value) begin
+                $display("Test Passed: Pooled pixel matches expected value (%0d)", expected_pooled_value);
+            end else begin
+                $display("Test Failed: Pooled pixel (%0d) does not match expected value (%0d)", pooled_pixel, expected_pooled_value);
+            end
+        end else begin
+            $display("Test Failed: Pooled valid signal not asserted");
+        end
+
+        // Finish simulation
+        #10;
+        $finish;
+    end
+
+endmodule

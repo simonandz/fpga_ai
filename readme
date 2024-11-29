@@ -1,3 +1,11 @@
 not finished, no op-codes definied yet
 
 bit widths/heights/depth can be adjusted in file settings to be written to fpga
+
+TO DO:
+-connect top level convolutional layer, flatten, fully_connected_layer, max_pooling, output_layer in top level controller
+-create opcodes for that thang
+-upload that thang onto the soc fpga
+-create python script to train that thang on the soc, drivers for python, and memory storage for the output
+
+-optimize for better performance on that thang hawk tuah and spit on that thang 

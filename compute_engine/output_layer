@@ -1,19 +1,68 @@
 // File: output_layer.sv
+`timescale 1ns/1ps
+
 module output_layer #(
-    parameter INPUT_SIZE = 12,           // Number of input features
-    parameter OUTPUT_SIZE = 4,           // Number of output neurons
-    parameter ACTIVATION = "none"        // Activation: "softmax", "sigmoid", "none"
+    parameter INPUT_SIZE = 12,         // Number of input features
+    parameter OUTPUT_SIZE = 4,         // Number of output neurons
+
+    // Activation function constants
+    parameter int ACT_NONE = 0,
+    parameter int ACT_SIGMOID = 1,
+
+    parameter int ACTIVATION = ACT_NONE // Activation: ACT_NONE, ACT_SIGMOID
 ) (
-    input  logic clk,                                // Clock signal
-    input  logic reset,                              // Reset signal
-    input  logic start,                              // Start signal
-    input  logic signed [15:0] input_vector [0:INPUT_SIZE-1], // Input features
-    input  logic signed [15:0] weights [0:(INPUT_SIZE * OUTPUT_SIZE)-1], // Weights
-    input  logic signed [15:0] biases [0:OUTPUT_SIZE-1],           // Biases
-    output logic signed [31:0] logits [0:OUTPUT_SIZE-1],          // Raw outputs (logits)
-    output logic [31:0] activated_output [0:OUTPUT_SIZE-1],       // Activated outputs
-    output logic done                                 // Operation done signal
+    input  logic clk,                                         // Clock signal
+    input  logic reset,                                       // Reset signal
+    input  logic start,                                       // Start signal
+
+    // Packed input vector
+    input  logic signed [INPUT_SIZE*16-1:0] input_vector_packed,
+
+    // Packed weights
+    input  logic signed [INPUT_SIZE*OUTPUT_SIZE*16-1:0] weights_packed,
+
+    // Biases
+    input  logic signed [15:0] biases [0:OUTPUT_SIZE-1],
+
+    // Packed outputs
+    output logic signed [OUTPUT_SIZE*32-1:0] logits_packed,          // Raw outputs (logits)
+    output logic [OUTPUT_SIZE*32-1:0] activated_output_packed,       // Activated outputs
+
+    output logic done                                          // Operation done signal
 );
+
+    // Unpack input_vector
+    logic signed [15:0] input_vector [0:INPUT_SIZE-1];
+    generate
+        genvar gen_idx_i;
+        for (gen_idx_i = 0; gen_idx_i < INPUT_SIZE; gen_idx_i = gen_idx_i + 1) begin
+            assign input_vector[gen_idx_i] = input_vector_packed[(INPUT_SIZE - gen_idx_i)*16 -1 -: 16];
+        end
+    endgenerate
+
+    // Unpack weights
+    logic signed [15:0] weights [0:OUTPUT_SIZE-1][0:INPUT_SIZE-1];
+    generate
+        genvar gen_idx_n, gen_idx_w;
+        for (gen_idx_n = 0; gen_idx_n < OUTPUT_SIZE; gen_idx_n = gen_idx_n + 1) begin
+            for (gen_idx_w = 0; gen_idx_w < INPUT_SIZE; gen_idx_w = gen_idx_w + 1) begin
+                assign weights[gen_idx_n][gen_idx_w] = weights_packed[((gen_idx_n*INPUT_SIZE + gen_idx_w)+1)*16 -1 -: 16];
+            end
+        end
+    endgenerate
+
+    // Internal Outputs
+    logic signed [31:0] logits [0:OUTPUT_SIZE-1];
+    logic [31:0] activated_output [0:OUTPUT_SIZE-1];
+
+    // Pack outputs
+    generate
+        genvar gen_idx_o;
+        for (gen_idx_o = 0; gen_idx_o < OUTPUT_SIZE; gen_idx_o = gen_idx_o + 1) begin
+            assign logits_packed[(OUTPUT_SIZE - gen_idx_o)*32 -1 -: 32] = logits[gen_idx_o];
+            assign activated_output_packed[(OUTPUT_SIZE - gen_idx_o)*32 -1 -: 32] = activated_output[gen_idx_o];
+        end
+    endgenerate
 
     // State Machine States
     typedef enum logic [1:0] {
@@ -27,20 +76,15 @@ module output_layer #(
 
     // Internal Registers
     logic signed [31:0] accumulators [0:OUTPUT_SIZE-1]; // Accumulators for each neuron
-    integer i, n;                                       // Loop indices
+    logic [$clog2(INPUT_SIZE):0] idx_i;
 
     // Sigmoid Activation (approximation)
-    function [31:0] sigmoid;
+    function automatic [31:0] sigmoid;
         input signed [31:0] x;
-        // Simple approximation: 1 / (1 + e^-x)
-        // Implemented using a lookup table or polynomial approximation
-        // For simplicity, return x (no activation)
-        sigmoid = x; // Placeholder: Implement actual sigmoid here
+        begin
+            sigmoid = x; // Placeholder: Implement actual sigmoid function as needed
+        end
     endfunction
-
-    // Softmax Activation (simplified)
-    // For demonstration, we'll skip actual implementation
-    // Implementing Softmax requires exponentials and division, which are non-trivial in hardware
 
     // State Transition
     always_ff @(posedge clk or posedge reset) begin
@@ -53,74 +97,96 @@ module output_layer #(
 
     // Next State Logic
     always_comb begin
+        next_state = current_state;
         case (current_state)
             IDLE: begin
                 if (start)
                     next_state = COMPUTE;
-                else
-                    next_state = IDLE;
             end
             COMPUTE: begin
-                if (i >= INPUT_SIZE)
+                if (idx_i >= INPUT_SIZE)
                     next_state = ACTIVATE;
-                else
-                    next_state = COMPUTE;
             end
             ACTIVATE: begin
-                // Depending on activation, transition accordingly
-                // Here, we assume activation is done in one cycle
                 next_state = DONE_STATE;
             end
             DONE_STATE: begin
                 next_state = IDLE;
             end
-            default: next_state = IDLE;
         endcase
     end
 
     // Sequential Logic for Computation
     always_ff @(posedge clk or posedge reset) begin
+        integer n; // Declare loop variable at the beginning of the block
         if (reset) begin
-            for (n = 0; n < OUTPUT_SIZE; n = n + 1)
-                accumulators[n] <= 32'sd0;
-            i <= 0;
+            idx_i <= 0;
             done <= 1'b0;
+            for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                accumulators[n] <= 32'sd0;
+                logits[n] <= 32'sd0;
+                activated_output[n] <= 32'sd0;
+            end
         end else begin
             case (current_state)
                 IDLE: begin
                     done <= 1'b0;
                     if (start) begin
-                        for (n = 0; n < OUTPUT_SIZE; n = n + 1)
+                        idx_i <= 0;
+                        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
                             accumulators[n] <= 32'sd0;
-                        i <= 0;
+                        end
                     end
                 end
                 COMPUTE: begin
-                    if (i < INPUT_SIZE) begin
+                    if (idx_i < INPUT_SIZE) begin
                         for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
-                            // Each neuron has INPUT_SIZE weights
-                            accumulators[n] <= accumulators[n] + ($signed(input_vector[i]) * $signed(weights[n*INPUT_SIZE + i]));
+                            accumulators[n] <= accumulators[n] + (input_vector[idx_i] * weights[n][idx_i]);
                         end
-                        i <= i + 1;
+                        idx_i <= idx_i + 1;
                     end
                 end
                 ACTIVATE: begin
                     for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
-                        logits[n] <= accumulators[n] + $signed(biases[n]);
-                        if (ACTIVATION == "sigmoid")
-                            activated_output[n] <= sigmoid(logits[n]);
-                        else if (ACTIVATION == "none")
-                            activated_output[n] <= logits[n];
-                        // Softmax implementation is omitted due to complexity
-                        // To implement Softmax, consider additional modules for exponentials and normalization
+                        logits[n] <= accumulators[n] + biases[n];
                     end
                 end
                 DONE_STATE: begin
                     done <= 1'b1;
                 end
-                default: ;
             endcase
         end
     end
+
+    // Activation Logic using Generate Block
+    generate
+        if (ACTIVATION == ACT_SIGMOID) begin : gen_sigmoid_activation
+            always_ff @(posedge clk or posedge reset) begin
+                integer n; // Declare loop variable at the beginning of the block
+                if (reset) begin
+                    for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                        activated_output[n] <= 32'sd0;
+                    end
+                end else if (current_state == DONE_STATE) begin
+                    for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                        activated_output[n] <= sigmoid(logits[n]);
+                    end
+                end
+            end
+        end else begin : gen_no_activation
+            always_ff @(posedge clk or posedge reset) begin
+                integer n; // Declare loop variable at the beginning of the block
+                if (reset) begin
+                    for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                        activated_output[n] <= 32'sd0;
+                    end
+                end else if (current_state == DONE_STATE) begin
+                    for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                        activated_output[n] <= logits[n];
+                    end
+                end
+            end
+        end
+    endgenerate
 
 endmodule

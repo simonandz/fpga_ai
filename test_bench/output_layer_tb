@@ -1,0 +1,238 @@
+// File: tb_output_layer.sv
+`timescale 1ns/1ps
+
+module tb_output_layer;
+
+    // Parameters
+    parameter INPUT_SIZE  = 12;
+    parameter OUTPUT_SIZE = 4;
+
+    // Activation function constants
+    parameter int ACT_NONE = 0;
+    parameter int ACT_SIGMOID = 1;
+
+    parameter int ACTIVATION = ACT_NONE; // Change to ACT_SIGMOID as needed
+
+    // Inputs to the DUT
+    logic clk;
+    logic reset;
+    logic start;
+
+    logic signed [INPUT_SIZE*16-1:0] input_vector_packed;
+    logic signed [INPUT_SIZE*OUTPUT_SIZE*16-1:0] weights_packed;
+    logic signed [15:0] biases [0:OUTPUT_SIZE-1];
+
+    // Outputs from the DUT
+    logic signed [OUTPUT_SIZE*32-1:0] logits_packed;
+    logic [OUTPUT_SIZE*32-1:0] activated_output_packed;
+    logic done;
+
+    // Internal variables
+    integer i, n;
+    integer error_count;
+
+    // Unpacked inputs
+    logic signed [15:0] input_vector [0:INPUT_SIZE-1];
+    logic signed [15:0] weights [0:INPUT_SIZE*OUTPUT_SIZE-1];
+
+    // Unpacked outputs
+    logic signed [31:0] logits [0:OUTPUT_SIZE-1];
+    logic [31:0] activated_output [0:OUTPUT_SIZE-1];
+
+    // Expected outputs
+    logic signed [31:0] expected_logits [0:OUTPUT_SIZE-1];
+    logic [31:0] expected_activated_output [0:OUTPUT_SIZE-1];
+
+    // Instantiate the DUT
+    output_layer #(
+        .INPUT_SIZE(INPUT_SIZE),
+        .OUTPUT_SIZE(OUTPUT_SIZE),
+        .ACTIVATION(ACTIVATION)
+    ) dut (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .input_vector_packed(input_vector_packed),
+        .weights_packed(weights_packed),
+        .biases(biases),
+        .logits_packed(logits_packed),
+        .activated_output_packed(activated_output_packed),
+        .done(done)
+    );
+
+    // Clock generation
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk; // Clock period: 10ns
+    end
+
+    // Task to pack input_vector
+    task pack_input_vector();
+        begin
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                input_vector_packed[(INPUT_SIZE - i)*16 -1 -: 16] = input_vector[i];
+            end
+        end
+    endtask
+
+    // Task to pack weights
+    task pack_weights();
+        begin
+            for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                    weights_packed[((n*INPUT_SIZE + i)+1)*16 -1 -: 16] = weights[n*INPUT_SIZE + i];
+                end
+            end
+        end
+    endtask
+
+    // Task to unpack logits
+    task unpack_logits();
+        begin
+            for (i = 0; i < OUTPUT_SIZE; i = i + 1) begin
+                logits[i] = logits_packed[(OUTPUT_SIZE - i)*32 -1 -: 32];
+            end
+        end
+    endtask
+
+    // Task to unpack activated_output
+    task unpack_activated_output();
+        begin
+            for (i = 0; i < OUTPUT_SIZE; i = i + 1) begin
+                activated_output[i] = activated_output_packed[(OUTPUT_SIZE - i)*32 -1 -: 32];
+            end
+        end
+    endtask
+
+    // Testbench logic
+    initial begin
+        // Initialize inputs
+        reset = 1;
+        start = 0;
+        input_vector_packed = '0;
+        weights_packed = '0;
+        for (i = 0; i < OUTPUT_SIZE; i = i + 1) begin
+            biases[i] = 16'sd0;
+        end
+
+        // Wait for a few clock cycles
+        @(posedge clk);
+        @(posedge clk);
+
+        // Release reset
+        reset = 0;
+        $display("Time %0t ns: Reset deasserted", $time);
+
+        // Wait for a clock cycle
+        @(posedge clk);
+
+        // Provide test vectors
+        // Example input vector
+        for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+            input_vector[i] = i + 1; // Input vector: 1, 2, 3, ..., INPUT_SIZE
+        end
+
+        // Example weights
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                weights[n*INPUT_SIZE + i] = ((n + i) % 5) - 2; // Weights between -2 and 2
+            end
+        end
+
+        // Example biases
+        for (i = 0; i < OUTPUT_SIZE; i = i + 1) begin
+            biases[i] = i - 2; // Biases: -2, -1, 0, 1
+        end
+
+        // Pack inputs
+        pack_input_vector();
+        pack_weights();
+
+        // Calculate expected outputs
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            expected_logits[n] = 32'sd0;
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                expected_logits[n] = expected_logits[n] + (input_vector[i] * weights[n*INPUT_SIZE + i]);
+            end
+            expected_logits[n] = expected_logits[n] + biases[n];
+
+            // Apply activation function (if any)
+            if (ACTIVATION == ACT_SIGMOID) begin
+                // Placeholder for sigmoid activation
+                expected_activated_output[n] = expected_logits[n]; // Replace with actual sigmoid calculation
+            end else begin
+                expected_activated_output[n] = expected_logits[n]; // No activation
+            end
+        end
+
+        // Display inputs
+        $display("Input Vector:");
+        for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+            $write("%0d ", input_vector[i]);
+        end
+        $display("\n");
+
+        $display("Weights:");
+        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+            $write("Neuron %0d: ", n);
+            for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+                $write("%0d ", weights[n*INPUT_SIZE + i]);
+            end
+            $display("");
+        end
+
+        $display("Biases:");
+        for (i = 0; i < OUTPUT_SIZE; i = i + 1) begin
+            $display("Bias[%0d] = %0d", i, biases[i]);
+        end
+
+        // Start the computation
+        @(posedge clk);
+        start = 1;
+        @(posedge clk);
+        start = 0;
+        $display("Time %0t ns: Started output layer computation", $time);
+
+        // Wait for the computation to complete
+        @(posedge clk);
+        while (!done) begin
+            @(posedge clk);
+        end
+        $display("Time %0t ns: Computation completed", $time);
+
+        // Wait one more clock cycle to ensure outputs are updated
+        @(posedge clk);
+
+        // Unpack outputs
+        unpack_logits();
+        unpack_activated_output();
+
+        // Check the outputs
+        error_count = 0;
+        for (i = 0; i < OUTPUT_SIZE; i = i + 1) begin
+            $display("Logits[%0d]: Expected = %0d, Actual = %0d", i, expected_logits[i], logits[i]);
+            $display("Activated Output[%0d]: Expected = %0d, Actual = %0d", i, expected_activated_output[i], activated_output[i]);
+
+            if (logits[i] !== expected_logits[i]) begin
+                $display("Mismatch in logits at output %0d: expected %0d, got %0d", i, expected_logits[i], logits[i]);
+                error_count = error_count + 1;
+            end
+
+            if (activated_output[i] !== expected_activated_output[i]) begin
+                $display("Mismatch in activated output at output %0d: expected %0d, got %0d", i, expected_activated_output[i], activated_output[i]);
+                error_count = error_count + 1;
+            end
+        end
+
+        if (error_count == 0) begin
+            $display("Test Passed: All outputs match expected values");
+        end else begin
+            $display("Test Failed: %0d mismatches found", error_count);
+        end
+
+        // Finish simulation
+        #10;
+        $finish;
+    end
+
+endmodule
