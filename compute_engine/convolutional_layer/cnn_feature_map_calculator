@@ -1,0 +1,170 @@
+// File: cnn_feature_map_calculator.sv
+`timescale 1ns/1ps
+
+module cnn_feature_map_calculator #(
+    parameter DATA_WIDTH = 8,                  // Width of input data
+    parameter KERNEL_SIZE = 3,                 // Size of the convolution kernel (assumed square)
+    parameter INPUT_DEPTH = 1,                 // Depth (number of channels) of input feature map
+    parameter NUM_FILTERS = 1,                 // Number of convolutional filters
+    parameter INPUT_HEIGHT = 3,                // Height of input feature map
+    parameter INPUT_WIDTH = 3,                 // Width of input feature map
+    parameter STRIDE = 1,                      // Stride of convolution
+    parameter PADDING = 0                      // Padding size
+)(
+    input  logic clk,                          
+    input  logic reset,                        
+    input  logic start,                        
+    input  logic signed [DATA_WIDTH-1:0] input_pixel,    // Signed 8-bit input pixel
+    input  logic signed [DATA_WIDTH-1:0] kernel_weight,  // Signed 8-bit kernel weight
+    input  logic signed [DATA_WIDTH-1:0] bias,           // Signed 8-bit bias
+    output logic signed [2*DATA_WIDTH-1:0] feature_map_pixel, // Signed 16-bit output pixel
+    output logic done                           
+);
+
+    // State Machine States
+    typedef enum logic [2:0] {
+        IDLE,
+        LOAD_INPUT,
+        LOAD_KERNEL,
+        CONVOLUTION,
+        STORE,
+        DONE_STATE
+    } state_t;
+
+    state_t current_state, next_state;
+
+    // Calculate output dimensions and buffer sizes using localparams
+    localparam integer input_buffer_size = INPUT_HEIGHT * INPUT_WIDTH * INPUT_DEPTH;
+    localparam integer kernel_buffer_size = NUM_FILTERS * KERNEL_SIZE * KERNEL_SIZE * INPUT_DEPTH;
+    localparam integer convolution_size = KERNEL_SIZE * KERNEL_SIZE * INPUT_DEPTH;
+
+    localparam integer output_height = ((INPUT_HEIGHT - KERNEL_SIZE + 2 * PADDING) / STRIDE) + 1;
+    localparam integer output_width  = ((INPUT_WIDTH - KERNEL_SIZE + 2 * PADDING) / STRIDE) + 1;
+
+    // Internal Registers
+    logic signed [DATA_WIDTH-1:0] input_buffer [0:input_buffer_size-1];
+    logic signed [DATA_WIDTH-1:0] kernel_buffer [0:kernel_buffer_size-1];
+    logic signed [2*DATA_WIDTH-1:0] accumulator; // 16-bit signed accumulator
+    // Declare temp_accumulator as a local variable within the CONVOLUTION state
+
+    // Variables for indexing
+    integer input_index;
+    integer kernel_index;
+    integer conv_count;
+
+    // State Transition
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state <= IDLE;
+        end else begin
+            current_state <= next_state;
+        end
+    end
+
+    // Next State Logic
+    always_comb begin
+        case (current_state)
+            IDLE: begin
+                if (start)
+                    next_state = LOAD_INPUT;
+                else
+                    next_state = IDLE;
+            end
+            LOAD_INPUT: begin
+                if (input_index >= input_buffer_size)
+                    next_state = LOAD_KERNEL;
+                else
+                    next_state = LOAD_INPUT;
+            end
+            LOAD_KERNEL: begin
+                if (kernel_index >= kernel_buffer_size)
+                    next_state = CONVOLUTION;
+                else
+                    next_state = LOAD_KERNEL;
+            end
+            CONVOLUTION: begin
+                next_state = STORE;
+            end
+            STORE: begin
+                if (conv_count < (output_height * output_width * NUM_FILTERS -1))
+                    next_state = CONVOLUTION;
+                else
+                    next_state = DONE_STATE;
+            end
+            DONE_STATE: begin
+                next_state = IDLE;
+            end
+            default: next_state = IDLE;
+        endcase
+    end
+
+    // Sequential Logic for Computation and Data Loading
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            accumulator <= '0;
+            feature_map_pixel <= '0;
+            done <= 1'b0;
+            input_index <= 0;
+            kernel_index <= 0;
+            conv_count <= 0;
+            // Initialize buffers
+            for (int i = 0; i < input_buffer_size; i++) begin
+                input_buffer[i] <= '0;
+            end
+            for (int i = 0; i < kernel_buffer_size; i++) begin
+                kernel_buffer[i] <= '0;
+            end
+        end else begin
+            case (current_state)
+                IDLE: begin
+                    done <= 1'b0;
+                    input_index <= 0;
+                    kernel_index <= 0;
+                    conv_count <= 0;
+                end
+                LOAD_INPUT: begin
+                    // Load input_pixel into input_buffer
+                    input_buffer[input_index] <= input_pixel;
+                    input_index <= input_index + 1;
+                end
+                LOAD_KERNEL: begin
+                    // Load kernel_weight into kernel_buffer
+                    kernel_buffer[kernel_index] <= kernel_weight;
+                    kernel_index <= kernel_index + 1;
+                end
+                CONVOLUTION: begin
+                    integer conv_idx; // Declare loop variable locally
+                    logic signed [2*DATA_WIDTH-1:0] temp_accumulator;
+
+                    // Reset temp_accumulator
+                    temp_accumulator = '0;
+
+                    // Perform convolution
+                    for (conv_idx = 0; conv_idx < convolution_size; conv_idx = conv_idx + 1) begin
+                        temp_accumulator = temp_accumulator + input_buffer[conv_idx] * kernel_buffer[conv_idx];
+                    end
+
+                    // Add bias
+                    temp_accumulator = temp_accumulator + bias;
+
+                    // Assign results
+                    accumulator <= temp_accumulator;
+                    feature_map_pixel <= temp_accumulator;
+                end
+
+                STORE: begin
+                    conv_count <= conv_count + 1;
+
+                    if (conv_count >= (output_height * output_width * NUM_FILTERS - 1)) begin
+                        done <= 1'b1;
+                    end
+                end
+
+                DONE_STATE: begin
+                    done <= 1'b1;
+                end
+            endcase
+        end
+    end
+
+endmodule

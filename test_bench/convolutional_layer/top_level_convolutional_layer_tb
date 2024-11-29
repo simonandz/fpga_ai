@@ -1,0 +1,163 @@
+// File: tb_top_level_convolutional_layer.sv
+`timescale 1ns/1ps
+
+module tb_top_level_convolutional_layer;
+
+    // Parameters
+    parameter DATA_WIDTH = 8;
+    parameter KERNEL_SIZE = 3;
+    parameter INPUT_DEPTH = 1;
+    parameter NUM_FILTERS = 1;
+    parameter INPUT_HEIGHT = 3;
+    parameter INPUT_WIDTH = 3;
+    parameter STRIDE = 1;
+    parameter PADDING = 0;
+
+    // Signals
+    logic clk;
+    logic reset;
+    logic start;
+    logic signed [DATA_WIDTH-1:0] input_pixel;
+    logic signed [DATA_WIDTH-1:0] kernel_weight;
+    logic signed [DATA_WIDTH-1:0] bias;
+    logic [15:0] num_parameters;
+    logic signed [2*DATA_WIDTH-1:0] relu_output;
+    logic done;
+
+    // Internal variables
+    integer i;
+    integer expected_num_parameters;
+
+    // Input data arrays
+    localparam integer INPUT_SIZE = INPUT_HEIGHT * INPUT_WIDTH * INPUT_DEPTH;
+    localparam integer KERNEL_SIZE_TOTAL = NUM_FILTERS * KERNEL_SIZE * KERNEL_SIZE * INPUT_DEPTH;
+
+    logic signed [DATA_WIDTH-1:0] inputs [0:INPUT_SIZE-1];
+    logic signed [DATA_WIDTH-1:0] kernels [0:KERNEL_SIZE_TOTAL-1];
+
+    // Instantiate the top-level module
+    top_level_convolutional_layer #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .KERNEL_SIZE(KERNEL_SIZE),
+        .INPUT_DEPTH(INPUT_DEPTH),
+        .NUM_FILTERS(NUM_FILTERS),
+        .INPUT_HEIGHT(INPUT_HEIGHT),
+        .INPUT_WIDTH(INPUT_WIDTH),
+        .STRIDE(STRIDE),
+        .PADDING(PADDING)
+    ) dut (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .input_pixel(input_pixel),
+        .kernel_weight(kernel_weight),
+        .bias(bias),
+        .num_parameters(num_parameters),
+        .relu_output(relu_output),
+        .done(done)
+    );
+
+    // Clock Generation: 10ns period
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk; // Toggle clock every 5ns
+    end
+
+    // Testbench Logic
+    initial begin
+        // Initialize signals
+        reset = 1;
+        start = 0;
+        input_pixel = '0;
+        kernel_weight = '0;
+        bias = 8'd0;
+
+        // Initialize Input Pixels (3x3 Input)
+        inputs[0] = 8'd1;
+        inputs[1] = 8'd2;
+        inputs[2] = 8'd3;
+        inputs[3] = 8'd4;
+        inputs[4] = 8'd5;
+        inputs[5] = 8'd6;
+        inputs[6] = 8'd7;
+        inputs[7] = 8'd8;
+        inputs[8] = 8'd9;
+
+        // Initialize Kernel Weights (3x3 Kernel)
+        kernels[0] = 8'd1;
+        kernels[1] = 8'd0;
+        kernels[2] = 8'd1;
+        kernels[3] = 8'd0;
+        kernels[4] = 8'd1;
+        kernels[5] = 8'd0;
+        kernels[6] = 8'd1;
+        kernels[7] = 8'd0;
+        kernels[8] = 8'd1;
+
+        // Set bias
+        bias = 8'd0;
+
+        // Apply Reset
+        #10;
+        reset = 0;
+        $display("Time %0t ns: Reset deasserted", $time);
+
+        // Wait for a clock edge after reset deassertion
+        @(posedge clk);
+
+        // Start Convolution
+        start = 1;
+        @(posedge clk);
+        start = 0;
+
+        // Feed Input Pixels Sequentially
+        for (i = 0; i < INPUT_SIZE; i = i + 1) begin
+            @(posedge clk);
+            input_pixel = inputs[i];
+            kernel_weight = '0; // No kernel weight during input loading
+        end
+        // Clear input_pixel after loading
+        @(posedge clk);
+        input_pixel = '0;
+
+        // Feed Kernel Weights Sequentially
+        for (i = 0; i < KERNEL_SIZE_TOTAL; i = i + 1) begin
+            @(posedge clk);
+            input_pixel = '0; // No input data during kernel loading
+            kernel_weight = kernels[i];
+        end
+        // Clear kernel_weight after loading
+        @(posedge clk);
+        kernel_weight = '0;
+
+        // Wait for operation to complete
+        wait (done == 1);
+        @(posedge clk);
+
+        // Display Results
+        $display("Time %0t ns: Convolution and ReLU operation completed", $time);
+        $display("Number of Parameters: %0d", num_parameters);
+        $display("ReLU Output: %0d", relu_output);
+
+        // Expected number of parameters
+        expected_num_parameters = (KERNEL_SIZE * KERNEL_SIZE * INPUT_DEPTH * NUM_FILTERS) + NUM_FILTERS;
+
+        if (num_parameters == expected_num_parameters) begin
+            $display("Test Passed: Number of parameters matches expected value (%0d)", expected_num_parameters);
+        end else begin
+            $display("Test Failed: Number of parameters (%0d) does not match expected value (%0d)", num_parameters, expected_num_parameters);
+        end
+
+        // Check ReLU Output
+        if (relu_output == 16'd25) begin
+            $display("Test Passed: ReLU output matches expected value (25)");
+        end else begin
+            $display("Test Failed: ReLU output (%0d) does not match expected value (25)", relu_output);
+        end
+
+        // Finish Simulation
+        #10;
+        $finish;
+    end
+
+endmodule

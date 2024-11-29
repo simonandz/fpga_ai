@@ -1,0 +1,121 @@
+// File: tb_relu_activation.sv
+`timescale 1ns/1ps
+
+module tb_relu_activation;
+
+    // Parameters
+    parameter DATA_WIDTH = 16;
+
+    // Testbench Signals
+    logic clk;
+    logic reset;
+    logic start;
+    logic signed [DATA_WIDTH-1:0] conv_input;
+    logic signed [DATA_WIDTH-1:0] relu_output;
+    logic done;
+
+    // Declare test_inputs array and loop variable at the module level
+    logic signed [DATA_WIDTH-1:0] test_inputs [0:5];
+    integer i;
+
+    // Declare wait_cycles at the module level
+    integer wait_cycles;
+
+    // Instantiate the relu_activation module
+    relu_activation #(
+        .DATA_WIDTH(DATA_WIDTH)
+    ) uut (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .conv_input(conv_input),
+        .relu_output(relu_output),
+        .done(done)
+    );
+
+    // Clock Generation: 10ns period
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk; // Toggle clock every 5ns
+    end
+
+    // Testbench Logic
+    initial begin
+        // Initialize signals
+        reset = 1;
+        start = 0;
+        conv_input = '0;
+
+        // Apply reset
+        #10;
+        reset = 0;
+        $display("Time %0t ns: Reset deasserted", $time);
+
+        // Wait for a clock edge after reset deassertion
+        @(posedge clk);
+
+        // Initialize test inputs
+        test_inputs[0] = -16'sd32768; // Minimum negative value for 16-bit signed
+        test_inputs[1] = -16'sd1000;
+        test_inputs[2] = 16'sd0;
+        test_inputs[3] = 16'sd1000;
+        test_inputs[4] = 16'sd32767;  // Maximum positive value for 16-bit signed
+        test_inputs[5] = 16'sd12345;
+
+        // Loop through test inputs
+        for (i = 0; i < 6; i = i + 1) begin
+            // Apply test input
+            @(posedge clk);
+            conv_input = test_inputs[i];
+            start = 1;
+            $display("Time %0t ns: Applying conv_input=%0d, start=%b", $time, conv_input, start);
+
+            // Wait for one clock cycle
+            @(posedge clk);
+            start = 0;
+
+            // Wait for done signal with timeout
+            wait_cycles = 0;
+            while (done == 0 && wait_cycles < 10) begin
+                @(posedge clk);
+                wait_cycles = wait_cycles + 1;
+            end
+
+            if (done == 0) begin
+                $display("Error: Timeout waiting for done signal at time %0t ns", $time);
+                $finish;
+            end
+
+            // Display results
+            $display("Time %0t ns: Test Case %0d", $time, i);
+            $display("  conv_input = %0d", conv_input);
+            $display("  relu_output = %0d", relu_output);
+
+            // Check the result
+            if (conv_input > 0) begin
+                if (relu_output !== conv_input) begin
+                    $display("  Error: Expected relu_output = %0d, got %0d", conv_input, relu_output);
+                end else begin
+                    $display("  Test Passed");
+                end
+            end else begin
+                if (relu_output !== 0) begin
+                    $display("  Error: Expected relu_output = 0, got %0d", relu_output);
+                end else begin
+                    $display("  Test Passed");
+                end
+            end
+
+            // Clear signals for next test
+            conv_input = '0;
+            start = 0;
+            @(posedge clk);
+            @(posedge clk);
+        end
+
+        // Finish simulation
+        #10;
+        $finish;
+    end
+
+endmodule

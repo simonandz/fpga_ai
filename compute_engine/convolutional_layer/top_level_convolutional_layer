@@ -1,0 +1,84 @@
+// File: top_level_convolutional_layer.sv
+`timescale 1ns/1ps
+
+//`include "cnn_feature_map_calculator"
+//`include "cnn_parameter_calculator"
+//`include "relu_activation"
+
+module top_level_convolutional_layer #(
+    parameter DATA_WIDTH = 8,                  // Width of data
+    parameter KERNEL_SIZE = 3,                 // Size of the convolution kernel (assumed square)
+    parameter INPUT_DEPTH = 1,                 // Depth (number of channels) of input feature map
+    parameter NUM_FILTERS = 1,                 // Number of convolutional filters
+    parameter INPUT_HEIGHT = 3,                // Height of input feature map
+    parameter INPUT_WIDTH = 3,                 // Width of input feature map
+    parameter STRIDE = 1,                      // Stride of convolution
+    parameter PADDING = 0                      // Padding size
+)(
+    input  logic clk,
+    input  logic reset,
+    input  logic start,
+    input  logic signed [DATA_WIDTH-1:0] input_pixel,    // Signed input pixel
+    input  logic signed [DATA_WIDTH-1:0] kernel_weight,  // Signed kernel weight
+    input  logic signed [DATA_WIDTH-1:0] bias,           // Signed bias
+    output logic [15:0] num_parameters,                  // Output: Number of parameters
+    output logic signed [2*DATA_WIDTH-1:0] relu_output,  // Signed ReLU output
+    output logic done                                     // Operation done signal
+);
+
+    // Internal Signals
+    logic signed [2*DATA_WIDTH-1:0] feature_map_pixel;
+    logic conv_done;
+    logic relu_done;
+
+    // Instantiate cnn_feature_map_calculator
+    cnn_feature_map_calculator #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .KERNEL_SIZE(KERNEL_SIZE),
+        .INPUT_DEPTH(INPUT_DEPTH),
+        .NUM_FILTERS(NUM_FILTERS),
+        .INPUT_HEIGHT(INPUT_HEIGHT),
+        .INPUT_WIDTH(INPUT_WIDTH),
+        .STRIDE(STRIDE),
+        .PADDING(PADDING)
+    ) feature_map_calc (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .input_pixel(input_pixel),
+        .kernel_weight(kernel_weight),
+        .bias(bias),
+        .feature_map_pixel(feature_map_pixel),
+        .done(conv_done)
+    );
+
+    // Instantiate cnn_parameter_calculator
+    cnn_parameter_calculator #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .KERNEL_SIZE(KERNEL_SIZE),
+        .INPUT_DEPTH(INPUT_DEPTH),
+        .NUM_FILTERS(NUM_FILTERS)
+    ) param_calc (
+        .num_filters(NUM_FILTERS[7:0]),      // Cast or slice to match 8-bit width
+        .kernel_height(KERNEL_SIZE[7:0]),
+        .kernel_width(KERNEL_SIZE[7:0]),
+        .input_depth(INPUT_DEPTH[7:0]),
+        .num_parameters(num_parameters)
+    );
+
+    // Instantiate relu_activation
+    relu_activation #(
+        .DATA_WIDTH(2*DATA_WIDTH)
+    ) relu (
+        .clk(clk),
+        .reset(reset),
+        .start(conv_done),
+        .conv_input(feature_map_pixel),
+        .relu_output(relu_output),
+        .done(relu_done)
+    );
+
+    // Assign done signal
+    assign done = relu_done;
+
+endmodule

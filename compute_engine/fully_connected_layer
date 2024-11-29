@@ -1,0 +1,97 @@
+// File: fully_connected_layer_param.sv
+module fully_connected_layer #(
+    parameter INPUT_SIZE = 12,    // Default input size
+    parameter OUTPUT_SIZE = 4     // Default output size
+) (
+    input  logic clk,                                // Clock signal
+    input  logic reset,                              // Reset signal
+    input  logic start,                              // Start signal
+    input  logic [7:0] input_vector [0:INPUT_SIZE-1], // Input features
+    input  logic signed [7:0] weights [0:INPUT_SIZE*OUTPUT_SIZE-1], // Weights
+    input  logic signed [7:0] biases [0:OUTPUT_SIZE-1],           // Biases
+    output logic signed [15:0] fc_output [0:OUTPUT_SIZE-1],        // Outputs
+    output logic done                                 // Operation done signal
+);
+    // State Machine States
+    typedef enum logic [1:0] {
+        IDLE,
+        COMPUTE,
+        DONE_STATE
+    } state_t;
+
+    state_t current_state, next_state;
+
+    // Internal Registers
+    logic signed [15:0] accumulators [0:OUTPUT_SIZE-1]; // Accumulators for each neuron
+    integer i, n;                                       // Loop indices
+    logic active;                                       // Indicates active computation
+
+    // State Transition
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state <= IDLE;
+        end else begin
+            current_state <= next_state;
+        end
+    end
+
+    // Next State Logic
+    always_comb begin
+        case (current_state)
+            IDLE: begin
+                if (start)
+                    next_state = COMPUTE;
+                else
+                    next_state = IDLE;
+            end
+            COMPUTE: begin
+                if (i >= INPUT_SIZE)
+                    next_state = DONE_STATE;
+                else
+                    next_state = COMPUTE;
+            end
+            DONE_STATE: begin
+                next_state = IDLE;
+            end
+            default: next_state = IDLE;
+        endcase
+    end
+
+    // Sequential Logic for Computation
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            for (n = 0; n < OUTPUT_SIZE; n = n + 1)
+                accumulators[n] <= 16'sd0;
+            done <= 1'b0;
+            i <= 0;
+        end else begin
+            case (current_state)
+                IDLE: begin
+                    done <= 1'b0;
+                    if (start) begin
+                        for (n = 0; n < OUTPUT_SIZE; n = n + 1)
+                            accumulators[n] <= 16'sd0;
+                        i <= 0;
+                    end
+                end
+                COMPUTE: begin
+                    if (i < INPUT_SIZE) begin
+                        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                            // Each neuron has INPUT_SIZE weights
+                            accumulators[n] <= accumulators[n] + ($signed(input_vector[i]) * $signed(weights[n*INPUT_SIZE + i]));
+                        end
+                        i <= i + 1;
+                    end
+                end
+                DONE_STATE: begin
+                    for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                        fc_output[n] <= accumulators[n] + $signed(biases[n]);
+                    end
+                    done <= 1'b1;
+                end
+                default: ;
+            endcase
+        end
+    end
+
+endmodule

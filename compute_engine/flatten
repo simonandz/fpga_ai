@@ -1,0 +1,117 @@
+// File: flattening.sv
+`timescale 1ns/1ps
+
+module flattening #(
+    parameter DATA_WIDTH = 8,             // Width of data (input_pixel and flattened_pixel)
+    parameter MAX_HEIGHT = 8,             // Maximum input height
+    parameter MAX_WIDTH = 8,              // Maximum input width
+    parameter MAX_DEPTH = 4               // Maximum input depth
+)(
+    input  logic clk,                                 // Clock signal
+    input  logic reset,                               // Reset signal
+    input  logic start,                               // Start flattening operation
+    input  logic [DATA_WIDTH-1:0] input_pixel,        // Input pixel
+    input  logic input_valid,                         // Input pixel valid signal
+    input  logic [$clog2(MAX_HEIGHT):0] input_height, // Height of input feature map
+    input  logic [$clog2(MAX_WIDTH):0] input_width,   // Width of input feature map
+    input  logic [$clog2(MAX_DEPTH):0] input_depth,   // Depth of input feature map
+    output logic [DATA_WIDTH-1:0] flattened_pixel,    // Flattened output pixel
+    output logic flattened_valid,                     // Flattened output valid signal
+    output logic done                                 // Flattening operation done signal
+);
+
+    // State Machine States
+    typedef enum logic [1:0] {
+        IDLE,
+        LOAD,
+        FLATTEN,
+        DONE_STATE
+    } state_t;
+
+    state_t current_state, next_state;
+
+    // Calculate maximum total pixels
+    localparam MAX_TOTAL_PIXELS = MAX_HEIGHT * MAX_WIDTH * MAX_DEPTH;
+
+    // Buffer to store input pixels
+    logic [DATA_WIDTH-1:0] pixel_buffer [0:MAX_TOTAL_PIXELS-1];
+
+    // Counters
+    logic [$clog2(MAX_TOTAL_PIXELS):0] load_index;
+    logic [$clog2(MAX_TOTAL_PIXELS):0] flatten_index;
+    logic [$clog2(MAX_TOTAL_PIXELS):0] total_pixels;
+
+    // State Transition
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state <= IDLE;
+        end else begin
+            current_state <= next_state;
+        end
+    end
+
+    // Next State Logic
+    always_comb begin
+        next_state = current_state;
+        case (current_state)
+            IDLE: begin
+                if (start)
+                    next_state = LOAD;
+            end
+            LOAD: begin
+                if (load_index >= total_pixels)
+                    next_state = FLATTEN;
+            end
+            FLATTEN: begin
+                if (flatten_index >= total_pixels)
+                    next_state = DONE_STATE;
+            end
+            DONE_STATE: begin
+                next_state = IDLE;
+            end
+        endcase
+    end
+
+    // Sequential Logic
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            load_index       <= 0;
+            flatten_index    <= 0;
+            total_pixels     <= 0;
+            flattened_pixel  <= 0;
+            flattened_valid  <= 0;
+            done             <= 0;
+        end else begin
+            case (current_state)
+                IDLE: begin
+                    load_index      <= 0;
+                    flatten_index   <= 0;
+                    total_pixels    <= input_height * input_width * input_depth;
+                    flattened_pixel <= 0;
+                    flattened_valid <= 0;
+                    done            <= 0;
+                end
+                LOAD: begin
+                    if (input_valid && load_index < total_pixels) begin
+                        pixel_buffer[load_index] <= input_pixel;
+                        load_index <= load_index + 1;
+                    end
+                end
+                FLATTEN: begin
+                    if (flatten_index < total_pixels) begin
+                        flattened_pixel <= pixel_buffer[flatten_index];
+                        flattened_valid <= 1'b1;
+                        flatten_index <= flatten_index + 1;
+                    end else begin
+                        flattened_valid <= 1'b0;
+                    end
+                end
+                DONE_STATE: begin
+                    done <= 1'b1;
+                    flattened_valid <= 1'b0;
+                end
+            endcase
+        end
+    end
+
+endmodule

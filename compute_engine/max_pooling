@@ -1,0 +1,126 @@
+// File: max_pooling.sv
+module max_pooling (
+    input  logic clk,                     // Clock signal
+    input  logic reset,                   // Reset signal
+    input  logic start,                   // Start pooling operation
+    input  logic [7:0] input_pixel,       // 8-bit input pixel
+    input  logic input_valid,             // Input pixel valid signal
+    output logic [7:0] pooled_pixel,      // 8-bit pooled output pixel
+    output logic pooled_valid,            // Pooled output valid signal
+    output logic done                      // Pooling operation done signal
+);
+
+    // State Machine States
+    typedef enum logic [1:0] {
+        IDLE,
+        LOAD,
+        POOL,
+        DONE_STATE
+    } state_t;
+
+    state_t current_state, next_state;
+
+    // Registers to hold 2x2 input window
+    logic [7:0] window [0:3]; // window[0] = top-left, window[1] = top-right, window[2] = bottom-left, window[3] = bottom-right
+    integer idx;
+
+    // Register to hold the maximum value
+    logic [7:0] max_val;
+
+    // State Transition
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state <= IDLE;
+        end else begin
+            current_state <= next_state;
+        end
+    end
+
+    // Next State Logic
+    always_comb begin
+        case (current_state)
+            IDLE: begin
+                if (start)
+                    next_state = LOAD;
+                else
+                    next_state = IDLE;
+            end
+            LOAD: begin
+                if (input_valid && idx == 3)
+                    next_state = POOL;
+                else
+                    next_state = LOAD;
+            end
+            POOL: begin
+                next_state = DONE_STATE;
+            end
+            DONE_STATE: begin
+                next_state = IDLE;
+            end
+            default: next_state = IDLE;
+        endcase
+    end
+
+    // Sequential Logic for Loading Window
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            for (idx = 0; idx < 4; idx = idx + 1)
+                window[idx] <= 8'd0;
+        end else begin
+            if (current_state == LOAD && input_valid) begin
+                window[idx] <= input_pixel;
+                if (idx < 3)
+                    idx <= idx + 1;
+                else
+                    idx <= 0; // Reset index after filling the window
+            end
+        end
+    end
+
+    // Max Pooling Operation
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            max_val <= 8'd0;
+        end else begin
+            if (current_state == POOL) begin
+                max_val <= window[0];
+                if (window[1] > max_val)
+                    max_val <= window[1];
+                if (window[2] > max_val)
+                    max_val <= window[2];
+                if (window[3] > max_val)
+                    max_val <= window[3];
+            end
+        end
+    end
+
+    // Output Logic
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            pooled_pixel <= 8'd0;
+            pooled_valid <= 1'b0;
+            done         <= 1'b0;
+        end else begin
+            case (current_state)
+                IDLE: begin
+                    pooled_valid <= 1'b0;
+                    done         <= 1'b0;
+                end
+                LOAD: begin
+                    pooled_valid <= 1'b0;
+                    done         <= 1'b0;
+                end
+                POOL: begin
+                    pooled_pixel <= max_val;
+                    pooled_valid <= 1'b1;
+                    done         <= 1'b1;
+                end
+                DONE_STATE: begin
+                    pooled_valid <= 1'b0;
+                    done         <= 1'b0;
+                end
+            endcase
+        end
+    end
+
+endmodule

@@ -1,0 +1,76 @@
+// File: relu_activation.sv
+`timescale 1ns/1ps
+
+module relu_activation #(
+    parameter DATA_WIDTH = 16               // Width of the input and output data
+)(
+    input  logic clk,
+    input  logic reset,
+    input  logic start,
+    input  logic signed [DATA_WIDTH-1:0] conv_input,  // Signed convolution input
+    output logic signed [DATA_WIDTH-1:0] relu_output, // Signed ReLU output
+    output logic done
+);
+
+    typedef enum logic [1:0] {
+        IDLE,
+        PROCESS,
+        DONE
+    } state_t;
+
+    state_t current_state, next_state;
+
+    // State Transition and Output Logic
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state <= IDLE;
+            relu_output <= 0;
+            done <= 1'b0;
+            $display("Time %0t ns: Reset asserted", $time);
+        end else begin
+            current_state <= next_state;
+
+            case (current_state)
+                IDLE: begin
+                    done <= 1'b0;
+                    relu_output <= relu_output; // Hold value
+                    if (start) begin
+                        $display("Time %0t ns: Transition to PROCESS state", $time);
+                    end
+                end
+                PROCESS: begin
+                    done <= 1'b0;
+                    if (conv_input > 0)
+                        relu_output <= conv_input;
+                    else
+                        relu_output <= 0;
+                    $display("Time %0t ns: Processing conv_input=%0d, relu_output=%0d", $time, conv_input, relu_output);
+                end
+                DONE: begin
+                    done <= 1'b1;
+                    $display("Time %0t ns: Transition to DONE state, done=%b", $time, done);
+                end
+            endcase
+        end
+    end
+
+    // Next State Logic
+    always_comb begin
+        next_state = current_state;
+        case (current_state)
+            IDLE: begin
+                if (start) begin
+                    next_state = PROCESS;
+                end
+            end
+            PROCESS: begin
+                next_state = DONE;
+            end
+            DONE: begin
+                next_state = IDLE;
+            end
+            default: next_state = IDLE;
+        endcase
+    end
+
+endmodule

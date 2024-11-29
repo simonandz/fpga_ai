@@ -1,0 +1,198 @@
+// File: tb_flattening.sv
+`timescale 1ns/1ps
+
+module tb_flattening;
+
+    // Parameters
+    parameter DATA_WIDTH = 8;
+    parameter MAX_HEIGHT = 8;
+    parameter MAX_WIDTH  = 8;
+    parameter MAX_DEPTH  = 4;
+
+    // Inputs to the DUT
+    logic clk;
+    logic reset;
+    logic start;
+    logic [DATA_WIDTH-1:0] input_pixel;
+    logic input_valid;
+    logic [$clog2(MAX_HEIGHT):0] input_height;
+    logic [$clog2(MAX_WIDTH):0] input_width;
+    logic [$clog2(MAX_DEPTH):0] input_depth;
+
+    // Outputs from the DUT
+    logic [DATA_WIDTH-1:0] flattened_pixel;
+    logic flattened_valid;
+    logic done;
+
+    // Internal variables
+    integer h, w, d;
+    integer i;
+    integer total_pixels;
+    integer flat_index;
+    integer error_count;
+    integer expected_index;
+
+    logic [DATA_WIDTH-1:0] input_feature_map [0:MAX_HEIGHT-1][0:MAX_WIDTH-1][0:MAX_DEPTH-1];
+    logic [DATA_WIDTH-1:0] flattened_pixels [0:(MAX_HEIGHT*MAX_WIDTH*MAX_DEPTH)-1];
+
+    // Instantiate the DUT
+    flattening #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .MAX_HEIGHT(MAX_HEIGHT),
+        .MAX_WIDTH(MAX_WIDTH),
+        .MAX_DEPTH(MAX_DEPTH)
+    ) dut (
+        .clk(clk),
+        .reset(reset),
+        .start(start),
+        .input_pixel(input_pixel),
+        .input_valid(input_valid),
+        .input_height(input_height),
+        .input_width(input_width),
+        .input_depth(input_depth),
+        .flattened_pixel(flattened_pixel),
+        .flattened_valid(flattened_valid),
+        .done(done)
+    );
+
+    // Clock generation
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk; // Clock period: 10ns
+    end
+
+    // Testbench logic
+    initial begin
+        // Initialize inputs
+        reset = 1;
+        start = 0;
+        input_pixel = '0;
+        input_valid = 0;
+        input_height = '0;
+        input_width = '0;
+        input_depth = '0;
+
+        // Wait for a few clock cycles
+        @(posedge clk);
+        @(posedge clk);
+
+        // Release reset
+        reset = 0;
+        $display("Time %0t ns: Reset deasserted", $time);
+
+        // Wait for a clock cycle
+        @(posedge clk);
+
+        // Set input dimensions
+        input_height = 2; // You can adjust these values
+        input_width  = 2;
+        input_depth  = 2;
+
+        $display("Time %0t ns: Setting input dimensions: Height=%0d, Width=%0d, Depth=%0d",
+                 $time, input_height, input_width, input_depth);
+
+        // Initialize input feature map with some values
+        total_pixels = input_height * input_width * input_depth;
+        $display("Total pixels to process: %0d", total_pixels);
+
+        for (d = 0; d < input_depth; d = d + 1) begin
+            for (h = 0; h < input_height; h = h + 1) begin
+                for (w = 0; w < input_width; w = w + 1) begin
+                    input_feature_map[h][w][d] = (h * input_width + w) + (d * input_height * input_width);
+                end
+            end
+        end
+
+        // Display the input feature map
+        $display("Input Feature Map:");
+        for (d = 0; d < input_depth; d = d + 1) begin
+            $display("Depth %0d:", d);
+            for (h = 0; h < input_height; h = h + 1) begin
+                $write("Row %0d: ", h);
+                for (w = 0; w < input_width; w = w + 1) begin
+                    $write("%0d ", input_feature_map[h][w][d]);
+                end
+                $display("");
+            end
+        end
+
+        // Wait for a clock cycle
+        @(posedge clk);
+
+        // Start the flattening operation
+        start = 1;
+        @(posedge clk);
+        start = 0;
+        $display("Time %0t ns: Started flattening operation", $time);
+
+        // Provide input pixels
+        fork
+            // Process to provide input pixels
+            begin
+                for (d = 0; d < input_depth; d = d + 1) begin
+                    for (h = 0; h < input_height; h = h + 1) begin
+                        for (w = 0; w < input_width; w = w + 1) begin
+                            // Wait for a clock cycle
+                            @(posedge clk);
+                            // Set input pixel and assert input_valid
+                            input_pixel = input_feature_map[h][w][d];
+                            input_valid = 1;
+                            $display("Time %0t ns: Providing input_pixel=%0d (H=%0d, W=%0d, D=%0d)",
+                                     $time, input_pixel, h, w, d);
+                            // Wait for a clock cycle
+                            @(posedge clk);
+                            // Deassert input_valid
+                            input_valid = 0;
+                        end
+                    end
+                end
+            end
+
+            // Process to collect flattened pixels
+            begin
+                flat_index = 0;
+                // Wait until the FLATTEN state begins
+                @(posedge clk);
+                while (!done) begin
+                    @(posedge clk);
+                    if (flattened_valid) begin
+                        flattened_pixels[flat_index] = flattened_pixel;
+                        $display("Time %0t ns: Flattened_pixel[%0d] = %0d", $time, flat_index, flattened_pixel);
+                        flat_index = flat_index + 1;
+                    end
+                end
+            end
+        join
+
+        $display("Time %0t ns: Flattening operation completed", $time);
+
+        // Initialize error counters
+        error_count = 0;
+        expected_index = 0;
+
+        // Compare the flattened_pixels array with the expected flattened sequence
+        for (d = 0; d < input_depth; d = d + 1) begin
+            for (h = 0; h < input_height; h = h + 1) begin
+                for (w = 0; w < input_width; w = w + 1) begin
+                    if (flattened_pixels[expected_index] !== input_feature_map[h][w][d]) begin
+                        $display("Mismatch at index %0d: expected %0d, got %0d",
+                                 expected_index, input_feature_map[h][w][d], flattened_pixels[expected_index]);
+                        error_count = error_count + 1;
+                    end
+                    expected_index = expected_index + 1;
+                end
+            end
+        end
+
+        if (error_count == 0) begin
+            $display("Test Passed: All flattened pixels match the input feature map");
+        end else begin
+            $display("Test Failed: %0d mismatches found", error_count);
+        end
+
+        // Finish simulation
+        #10;
+        $finish;
+    end
+
+endmodule

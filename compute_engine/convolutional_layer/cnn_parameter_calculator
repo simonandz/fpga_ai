@@ -1,0 +1,20 @@
+// File: cnn_parameter_calculator.sv
+`timescale 1ns/1ps
+
+module cnn_parameter_calculator #(
+    parameter DATA_WIDTH = 8,               // Width of data
+    parameter KERNEL_SIZE = 3,              // Size of the convolution kernel
+    parameter INPUT_DEPTH = 1,              // Depth (number of input channels)
+    parameter NUM_FILTERS = 1               // Number of convolutional filters
+)(
+    input  logic [7:0] num_filters,     
+    input  logic [7:0] kernel_height,   
+    input  logic [7:0] kernel_width,    
+    input  logic [7:0] input_depth,     
+    output logic [15:0] num_parameters  
+);
+
+    // Calculate weights per filter: kernel_height * kernel_width * input_depth
+    assign num_parameters = (kernel_height * kernel_width * input_depth * num_filters) + num_filters; // Assuming 1 bias per filter
+
+endmodule

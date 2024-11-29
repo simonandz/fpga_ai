@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch base_lenet_training (MSVC)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "R:/Python Projects/fpga_ai/training_scrips/base_lenet_training.cpp",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "externalTerminal"
+        }
+    ]
+}

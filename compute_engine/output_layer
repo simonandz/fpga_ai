@@ -1,0 +1,126 @@
+// File: output_layer.sv
+module output_layer #(
+    parameter INPUT_SIZE = 12,           // Number of input features
+    parameter OUTPUT_SIZE = 4,           // Number of output neurons
+    parameter ACTIVATION = "none"        // Activation: "softmax", "sigmoid", "none"
+) (
+    input  logic clk,                                // Clock signal
+    input  logic reset,                              // Reset signal
+    input  logic start,                              // Start signal
+    input  logic signed [15:0] input_vector [0:INPUT_SIZE-1], // Input features
+    input  logic signed [15:0] weights [0:(INPUT_SIZE * OUTPUT_SIZE)-1], // Weights
+    input  logic signed [15:0] biases [0:OUTPUT_SIZE-1],           // Biases
+    output logic signed [31:0] logits [0:OUTPUT_SIZE-1],          // Raw outputs (logits)
+    output logic [31:0] activated_output [0:OUTPUT_SIZE-1],       // Activated outputs
+    output logic done                                 // Operation done signal
+);
+
+    // State Machine States
+    typedef enum logic [1:0] {
+        IDLE,
+        COMPUTE,
+        ACTIVATE,
+        DONE_STATE
+    } state_t;
+
+    state_t current_state, next_state;
+
+    // Internal Registers
+    logic signed [31:0] accumulators [0:OUTPUT_SIZE-1]; // Accumulators for each neuron
+    integer i, n;                                       // Loop indices
+
+    // Sigmoid Activation (approximation)
+    function [31:0] sigmoid;
+        input signed [31:0] x;
+        // Simple approximation: 1 / (1 + e^-x)
+        // Implemented using a lookup table or polynomial approximation
+        // For simplicity, return x (no activation)
+        sigmoid = x; // Placeholder: Implement actual sigmoid here
+    endfunction
+
+    // Softmax Activation (simplified)
+    // For demonstration, we'll skip actual implementation
+    // Implementing Softmax requires exponentials and division, which are non-trivial in hardware
+
+    // State Transition
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            current_state <= IDLE;
+        end else begin
+            current_state <= next_state;
+        end
+    end
+
+    // Next State Logic
+    always_comb begin
+        case (current_state)
+            IDLE: begin
+                if (start)
+                    next_state = COMPUTE;
+                else
+                    next_state = IDLE;
+            end
+            COMPUTE: begin
+                if (i >= INPUT_SIZE)
+                    next_state = ACTIVATE;
+                else
+                    next_state = COMPUTE;
+            end
+            ACTIVATE: begin
+                // Depending on activation, transition accordingly
+                // Here, we assume activation is done in one cycle
+                next_state = DONE_STATE;
+            end
+            DONE_STATE: begin
+                next_state = IDLE;
+            end
+            default: next_state = IDLE;
+        endcase
+    end
+
+    // Sequential Logic for Computation
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            for (n = 0; n < OUTPUT_SIZE; n = n + 1)
+                accumulators[n] <= 32'sd0;
+            i <= 0;
+            done <= 1'b0;
+        end else begin
+            case (current_state)
+                IDLE: begin
+                    done <= 1'b0;
+                    if (start) begin
+                        for (n = 0; n < OUTPUT_SIZE; n = n + 1)
+                            accumulators[n] <= 32'sd0;
+                        i <= 0;
+                    end
+                end
+                COMPUTE: begin
+                    if (i < INPUT_SIZE) begin
+                        for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                            // Each neuron has INPUT_SIZE weights
+                            accumulators[n] <= accumulators[n] + ($signed(input_vector[i]) * $signed(weights[n*INPUT_SIZE + i]));
+                        end
+                        i <= i + 1;
+                    end
+                end
+                ACTIVATE: begin
+                    for (n = 0; n < OUTPUT_SIZE; n = n + 1) begin
+                        logits[n] <= accumulators[n] + $signed(biases[n]);
+                        if (ACTIVATION == "sigmoid")
+                            activated_output[n] <= sigmoid(logits[n]);
+                        else if (ACTIVATION == "none")
+                            activated_output[n] <= logits[n];
+                        // Softmax implementation is omitted due to complexity
+                        // To implement Softmax, consider additional modules for exponentials and normalization
+                    end
+                end
+                DONE_STATE: begin
+                    done <= 1'b1;
+                end
+                default: ;
+            endcase
+        end
+    end
+
+endmodule

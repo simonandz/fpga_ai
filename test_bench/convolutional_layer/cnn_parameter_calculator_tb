@@ -1,0 +1,100 @@
+// File: tb_cnn_parameter_calculator.sv
+`timescale 1ns/1ps
+
+module tb_cnn_parameter_calculator;
+
+    // Parameters (if any)
+    parameter DATA_WIDTH = 8;
+    parameter KERNEL_SIZE = 3;
+    parameter INPUT_DEPTH = 1;
+    parameter NUM_FILTERS = 1;
+
+    // Testbench Signals
+    logic [7:0] num_filters;
+    logic [7:0] kernel_height;
+    logic [7:0] kernel_width;
+    logic [7:0] input_depth;
+    logic [15:0] num_parameters;
+
+    // Instantiate the cnn_parameter_calculator module
+    cnn_parameter_calculator #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .KERNEL_SIZE(KERNEL_SIZE),
+        .INPUT_DEPTH(INPUT_DEPTH),
+        .NUM_FILTERS(NUM_FILTERS)
+    ) uut (
+        .num_filters(num_filters),
+        .kernel_height(kernel_height),
+        .kernel_width(kernel_width),
+        .input_depth(input_depth),
+        .num_parameters(num_parameters)
+    );
+
+    // Testbench Initial Block
+    initial begin
+        // Test Case 1
+        num_filters = 8'd8;
+        kernel_height = 8'd3;
+        kernel_width = 8'd3;
+        input_depth = 8'd1;
+        #10; // Wait for computation
+
+        $display("Test Case 1:");
+        $display("  num_filters   = %0d", num_filters);
+        $display("  kernel_height = %0d", kernel_height);
+        $display("  kernel_width  = %0d", kernel_width);
+        $display("  input_depth   = %0d", input_depth);
+        $display("  num_parameters= %0d", num_parameters);
+
+        if (num_parameters == ((kernel_height * kernel_width * input_depth * num_filters) + num_filters)) begin
+            $display("  Test Case 1 Passed\n");
+        end else begin
+            $display("  Test Case 1 Failed\n");
+        end
+
+        // Test Case 2
+        num_filters = 8'd16;
+        kernel_height = 8'd5;
+        kernel_width = 8'd5;
+        input_depth = 8'd3;
+        #10; // Wait for computation
+
+        $display("Test Case 2:");
+        $display("  num_filters   = %0d", num_filters);
+        $display("  kernel_height = %0d", kernel_height);
+        $display("  kernel_width  = %0d", kernel_width);
+        $display("  input_depth   = %0d", input_depth);
+        $display("  num_parameters= %0d", num_parameters);
+
+        if (num_parameters == ((kernel_height * kernel_width * input_depth * num_filters) + num_filters)) begin
+            $display("  Test Case 2 Passed\n");
+        end else begin
+            $display("  Test Case 2 Failed\n");
+        end
+
+        // Test Case 3
+        num_filters = 8'd32;
+        kernel_height = 8'd7;
+        kernel_width = 8'd7;
+        input_depth = 8'd64;
+        #10; // Wait for computation
+
+        $display("Test Case 3:");
+        $display("  num_filters   = %0d", num_filters);
+        $display("  kernel_height = %0d", kernel_height);
+        $display("  kernel_width  = %0d", kernel_width);
+        $display("  input_depth   = %0d", input_depth);
+        $display("  num_parameters= %0d", num_parameters);
+
+        if (num_parameters == ((kernel_height * kernel_width * input_depth * num_filters) + num_filters)) begin
+            $display("  Test Case 3 Passed\n");
+        end else begin
+            $display("  Test Case 3 Failed\n");
+        end
+
+        // Finish Simulation
+        #10;
+        $finish;
+    end
+
+endmodule
